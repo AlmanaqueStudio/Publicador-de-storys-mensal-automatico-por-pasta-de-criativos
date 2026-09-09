@@ -1,0 +1,7 @@
+
+> story-bot@1.0.0 setup
+> node publish-stories.js --setup
+
+11:42:19 - abrindo o Chrome. Faca login na conta do Facebook/Meta que administra a pagina alvo.
+11:42:19 - quando terminar de logar e ver o Meta Business Suite, feche a janela.
+11:56:47 - perfil salvo em ./chrome-profile - proximos comandos ja entram logados.

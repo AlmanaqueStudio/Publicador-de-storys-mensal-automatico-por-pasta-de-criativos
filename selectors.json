@@ -1,0 +1,100 @@
+{
+  "_comment": "Textos/rotulos que o bot procura na interface do Meta Business Suite. A UI muda com frequencia e varia por idioma. Rode com \"debug\": true no config.json para gerar prints em ./debug e ajuste estes valores conforme o que aparecer na sua conta.",
+
+  "createStoryButton": [
+    "Storys",
+    "Story",
+    "História",
+    "Histórias",
+    "Criar história",
+    "Criar história (story)",
+    "Create story",
+    "Stories",
+    "Adicionar à história"
+  ],
+
+  "composerFileInput": "input[type=file]",
+
+  "addPhotoVideoButton": [
+    "Adicionar foto/vídeo",
+    "Foto/vídeo",
+    "Adicionar foto ou vídeo",
+    "Add photo or video",
+    "Carregar"
+  ],
+
+  "facebookPlacementToggle": [
+    "Facebook",
+    "Página do Facebook"
+  ],
+
+  "instagramPlacementToggle": [
+    "Instagram",
+    "Conta do Instagram"
+  ],
+
+  "publishButton": [
+    "Publicar",
+    "Partilhar na história",
+    "Partilhar agora",
+    "Compartilhar",
+    "Publicar história",
+    "Share to story",
+    "Share now",
+    "Publish"
+  ],
+
+  "confirmationText": [
+    "história foi partilhada",
+    "história foi publicada",
+    "sua história foi",
+    "story foi publicad",
+    "Story published",
+    "Your story was shared",
+    "publicado com sucesso",
+    "foi partilhado"
+  ],
+
+  "errorText": [
+    "Algo correu mal",
+    "Something went wrong",
+    "não foi possível publicar",
+    "tenta novamente",
+    "try again"
+  ],
+
+  "_comment_schedule": "Usados so no modo --schedule (agenda direto no calendario do Meta em vez de publicar na hora). Confirmado no print de debug: dentro de 'Criar story' existe uma secao 'Programar' com alternador 'Compartilhar agora' / 'Programar' (nao um menu escondido). scheduleDateInput/scheduleTimeInput ainda sao palpite — ajuste com base no proximo print (5_schedule_open / 6_schedule_filled) se nao acertar de primeira.",
+
+  "scheduleOptionButton": [
+    "Programar",
+    "Agendar",
+    "Agendar publicação",
+    "Schedule",
+    "Schedule post"
+  ],
+
+  "scheduleDateInput": "input[type='date'], input[aria-label*='ata' i], input[placeholder*='ata' i]",
+
+  "scheduleTimeInput": "input[type='time'], input[aria-label*='ora' i], input[placeholder*='ime' i]",
+
+  "scheduleConfirmButton": [
+    "Compartilhar",
+    "Programar",
+    "Agendar",
+    "Concluir",
+    "Confirmar",
+    "Schedule",
+    "Done",
+    "Confirm"
+  ],
+
+  "scheduledConfirmationText": [
+    "história foi agendada",
+    "story foi agendad",
+    "agendado com sucesso",
+    "Story scheduled",
+    "was scheduled",
+    "adicionado ao calendário",
+    "added to your calendar"
+  ]
+}

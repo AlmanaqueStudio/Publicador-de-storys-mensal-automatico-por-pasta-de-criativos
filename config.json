@@ -1,0 +1,35 @@
+{
+  "calendarUrl": "https://business.facebook.com/latest/content_calendar?business_id=101785859634099&asset_id=155843388304954&calendar_type=MONTH",
+  "homeUrl": "https://business.facebook.com/latest/home?business_id=101785859634099&asset_id=155843388304954",
+
+  "mediaDir": "./media",
+  "mediaExtensions": [".mp4", ".mov", ".jpg", ".jpeg", ".png"],
+
+  "schedule": {
+    "startDate": "today",
+    "endDate": "endOfMonth",
+    "perDay": 1,
+    "time": "12:00"
+  },
+
+  "targets": { "facebook": true, "instagram": true },
+
+  "humanize": {
+    "minActionDelayMs": 900,
+    "maxActionDelayMs": 2600,
+    "typoChancePerChar": 0.0,
+    "mouseSteps": 18
+  },
+
+  "confirmTimeoutMs": 120000,
+  "betweenStoriesDelayMs": [15000, 45000],
+
+  "profileDir": "./chrome-profile",
+  "debug": true,
+
+  "cdp": {
+    "enabled": false,
+    "url": "http://localhost:9222",
+    "_comment": "enabled=true faz o bot abrir uma NOVA ABA no seu Chrome ja aberto (reaproveita seu login), em vez de uma janela separada. Precisa abrir o Chrome com --remote-debugging-port=9222 antes — veja o README."
+  }
+}

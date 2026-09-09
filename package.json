@@ -1,0 +1,21 @@
+{
+  "name": "story-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Publica storys no Facebook e Instagram pelo Meta Business Suite, simulando uma pessoa, um por vez e esperando a confirmacao de envio.",
+  "type": "module",
+  "scripts": {
+    "setup": "node publish-stories.js --setup",
+    "plan": "node publish-stories.js --plan",
+    "run": "node publish-stories.js --run",
+    "run:all": "node publish-stories.js --run --all",
+    "schedule": "node publish-stories.js --run --schedule",
+    "schedule:all": "node publish-stories.js --run --schedule --all",
+    "daemon": "node publish-stories.js --daemon",
+    "server": "node server.js"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.3",
+    "playwright": "^1.47.0"
+  }
+}
