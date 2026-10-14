@@ -52,12 +52,43 @@ export const PROGRESS = {
   current: null,
   items: [],
   lastError: null,
-  scheduleMode: false
+  scheduleMode: false,
+  cancelRequested: false
 };
+
+// Pagina/contexto da execucao em andamento, usados por requestCancel() para
+// interromper na hora qualquer espera do Playwright (locator.click etc.) em
+// vez de deixar o item atual estourar o timeout normal (ate 30s).
+let currentSession = null;
+
+// Pedido de cancelamento vindo do dashboard (botao "Cancelar tudo"). Nao mata
+// o processo: so avisa o loop do runBatch pra parar assim que puder e fecha a
+// aba que o bot esta usando agora, sem tentar de novo nem seguir pro proximo.
+export function requestCancel() {
+  if (!PROGRESS.running || PROGRESS.cancelRequested) return false;
+  PROGRESS.cancelRequested = true;
+  log("cancelamento pedido — parando apos a etapa atual…");
+  if (currentSession) {
+    const { page, ctx, cdp } = currentSession;
+    // Modo CDP: so fecha a aba do bot, nunca o navegador/contexto do usuario.
+    (cdp ? page.close() : ctx.close()).catch(() => {});
+  }
+  return true;
+}
 
 const log = (...a) => console.log(new Date().toLocaleTimeString(), "-", ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rand = (min, max) => Math.floor(min + Math.random() * (max - min));
+
+// Como o sleep() entre storys (config: betweenStoriesDelayMs, 15-45s) e o mais
+// longo do fluxo, esperar em pedacos pequenos deixa o cancelamento reagir em
+// no maximo 500ms em vez de so no proximo item.
+async function sleepCancelable(ms) {
+  const passo = 500;
+  for (let restante = ms; restante > 0 && !PROGRESS.cancelRequested; restante -= passo) {
+    await sleep(Math.min(passo, restante));
+  }
+}
 
 function humanPause() {
   return sleep(rand(CONFIG.humanize.minActionDelayMs, CONFIG.humanize.maxActionDelayMs));
@@ -75,12 +106,12 @@ async function humanMoveTo(page, box) {
   await page.mouse.move(target.x, target.y, { steps });
 }
 
-async function humanClick(page, locator) {
+async function humanClick(page, locator, { timeout } = {}) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
   const box = await locator.boundingBox().catch(() => null);
   await humanMoveTo(page, box);
   await humanPause();
-  await locator.click({ delay: rand(40, 120) });
+  await locator.click({ delay: rand(40, 120), ...(timeout ? { timeout } : {}) });
 }
 
 // Procura o primeiro locator visivel a partir de uma lista de textos.
@@ -154,8 +185,11 @@ async function footerActionButton(page, exactTexts) {
 // checagem achar "ainda aberto" pra sempre, mesmo com o composer ja fechado
 // havia muito tempo, e o agendamento saindo certo. O titulo "Criar story" so
 // existe dentro do composer, entao e um sinal sem ambiguidade nenhuma.
+// So "Criar story": o Planner (pra onde o Meta volta depois de programar) tem
+// um botao azul "Criar post" no canto — aceitar "post" aqui fazia o composer
+// parecer aberto pra sempre e todo item caia no timeout de 2 min.
 async function isComposerOpen(page) {
-  const heading = page.getByText(/^Criar (st[oó]ry|post)$/i);
+  const heading = page.getByText(/^Criar st[oó]ry$/i);
   const n = await heading.count().catch(() => 0);
   for (let i = 0; i < n; i++) {
     if (await heading.nth(i).isVisible().catch(() => false)) return true;
@@ -163,14 +197,96 @@ async function isComposerOpen(page) {
   return false;
 }
 
+// Timeout bem maior que o padrao (30s) do Playwright: o botao final so fica
+// habilitado depois que o Meta termina de processar a midia (gerar preview,
+// validar destino/data) — video grande ou o servidor deles mais lento podem
+// levar bem mais que 30s nisso, e o botao existe na tela o tempo todo, so
+// com aria-disabled=true ate acabar. Sem isso o item cai em "erro" mesmo
+// quando so precisava esperar mais um pouco.
+const FINAL_ACTION_TIMEOUT_MS = 120000;
+
+// O Meta recusa video de story com mais de 30s: mostra "Encurte o video" /
+// "O video e muito longo" e deixa o botao final desabilitado pra sempre. Sem
+// esta checagem o bot ficava 2 min esperando o botao e caia num "Timeout"
+// que nao dizia o motivo real.
+async function assertMediaAccepted(page, mediaPath) {
+  const body = (await page.locator("body").innerText().catch(() => "")) || "";
+  if (/v[ií]deo [eé] muito longo|Encurte o v[ií]deo|video is too long|Trim your video/i.test(body)) {
+    await debugShot(page, "video_longo");
+    throw new Error(
+      `O Meta recusou ${path.basename(mediaPath)}: video muito longo. Story do Facebook aceita no maximo 30 segundos — ` +
+      `corte o video e tente de novo.`
+    );
+  }
+}
+
+// Botoes visiveis cujo nome e EXATAMENTE o texto (ignora maiusculas), com a
+// posicao na tela de cada um.
+async function visibleExactButtons(page, text) {
+  const loc = page.getByRole("button", { name: new RegExp(`^\\s*${escapeRe(text)}\\s*$`, "i") });
+  const n = await loc.count().catch(() => 0);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const el = loc.nth(i);
+    if (!(await el.isVisible().catch(() => false))) continue;
+    const box = await el.boundingBox().catch(() => null);
+    if (box) out.push({ el, box });
+  }
+  return out;
+}
+
+// Passo 3: a aba "Programar" da secao Programar (a de cima, ao lado de
+// "Compartilhar agora") — nunca o botao azul do rodape.
+async function clickProgramarTab(page) {
+  const btns = await visibleExactButtons(page, "Programar");
+  if (!btns.length) throw new Error('Nao achei a aba "Programar" na secao Programar do composer.');
+  btns.sort((a, b) => a.box.y - b.box.y);
+  await humanClick(page, btns[0].el);
+}
+
+// Passo 5: o botao "Programar" do rodape, na mesma linha e a direita do
+// "Cancelar". Espera ate FINAL_ACTION_TIMEOUT_MS ele habilitar.
+async function clickFooterProgramar(page) {
+  const cancel = (await visibleExactButtons(page, "Cancelar")).sort((a, b) => b.box.y - a.box.y)[0];
+  const btns = await visibleExactButtons(page, "Programar");
+  let target = null;
+  if (cancel) {
+    const cy = cancel.box.y + cancel.box.height / 2;
+    target = btns.find(({ box }) => Math.abs(box.y + box.height / 2 - cy) < 30 && box.x > cancel.box.x) || null;
+  }
+  if (!target) {
+    // Sem "Cancelar" na tela: usa o "Programar" mais embaixo (o do rodape).
+    target = btns.sort((a, b) => b.box.y - a.box.y)[0] || null;
+  }
+  if (!target) throw new Error('Nao achei o botao "Programar" no rodape (ao lado de "Cancelar").');
+  log(`aguardando o botao "Programar" do rodape habilitar (ate ${FINAL_ACTION_TIMEOUT_MS / 1000}s)…`);
+  await humanClick(page, target.el, { timeout: FINAL_ACTION_TIMEOUT_MS });
+}
+
 async function clickFinalAction(page, { exactTexts, fallbackTexts, what }) {
   const btn = await footerActionButton(page, exactTexts);
   if (btn) {
-    await humanClick(page, btn);
+    log(`aguardando o botao "${what}" habilitar (ate ${FINAL_ACTION_TIMEOUT_MS / 1000}s — o Meta pode demorar pra terminar de processar a midia)…`);
+    await humanClick(page, btn, { timeout: FINAL_ACTION_TIMEOUT_MS });
     return;
   }
   log(`aviso: nao achei o botao final pelo texto exato (${exactTexts.join("/")}) — usando busca por texto solto como fallback para ${what}.`);
   await clickByText(page, fallbackTexts, { what });
+}
+
+// Espera o indicador "Carregando mídia" (barra de progresso do upload)
+// desaparecer da tela — sinal real de que o preview terminou de processar,
+// em vez de confiar num tempo fixo. Se nunca sumir dentro do prazo, retorna
+// false (quem chamou decide o que fazer — normalmente abortar esse item).
+async function waitForMediaReady(page, timeoutMs) {
+  const loadingRe = new RegExp(SEL.mediaLoadingText.map(escapeRe).join("|"), "i");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const body = (await page.textContent("body").catch(() => "")) || "";
+    if (!loadingRe.test(body)) return true;
+    await sleep(1000);
+  }
+  return false;
 }
 
 async function debugShot(page, name) {
@@ -331,9 +447,21 @@ async function openComposerAndUpload(page, mediaPath, dateStr) {
     await fileInput.setInputFiles(mediaPath);
   }
 
-  // Espera o upload/preview processar (video demora mais).
-  await sleep(rand(9000, 16000));
+  // Espera de verdade o upload/preview terminar de processar, em vez de um
+  // tempo fixo torcendo pra ter sido suficiente — foi exatamente isso que
+  // mascarava um arquivo com problema real: ele ficava preso em "Carregando
+  // mídia" pra sempre e o erro so aparecia bem mais na frente, no botao
+  // final "Programar" travado, sem dizer o motivo verdadeiro.
+  await sleep(1500); // da tempo do indicador de carregamento aparecer antes de checar
+  const carregou = await waitForMediaReady(page, CONFIG.mediaReadyTimeoutMs || 90000);
   await debugShot(page, "3_uploaded");
+  if (!carregou) {
+    throw new Error(
+      `A mídia não terminou de carregar no Meta depois de ${Math.round((CONFIG.mediaReadyTimeoutMs || 90000) / 1000)}s ` +
+      `(${path.basename(mediaPath)}) — o arquivo pode ter um problema (codec/formato); reexporte e tente de novo.`
+    );
+  }
+  await sleep(rand(1000, 2500)); // acomoda a tela depois que o preview aparece
 
   // Garante Facebook + Instagram marcados, se o composer tiver esses toggles.
   await ensurePlacement(page, SEL.facebookPlacementToggle, CONFIG.targets.facebook, "Facebook");
@@ -343,13 +471,14 @@ async function openComposerAndUpload(page, mediaPath, dateStr) {
 
 async function publishOne(page, mediaPath, dateStr) {
   await openComposerAndUpload(page, mediaPath, dateStr);
+  await assertMediaAccepted(page, mediaPath);
 
   await humanPause();
   log("clicando em publicar…");
   await clickFinalAction(page, { exactTexts: ["Compartilhar", "Publicar", "Share", "Publish"], fallbackTexts: SEL.publishButton, what: "botao Publicar" });
 
   // Espera a confirmacao de envio antes de liberar o proximo.
-  await waitForConfirmation(page, { okTexts: SEL.confirmationText, dateStr });
+  await waitForConfirmation(page, { okTexts: SEL.confirmationText, dateStr }).catch(markAfterSubmit);
   log("story confirmado ✓");
 }
 
@@ -364,19 +493,25 @@ async function scheduleOne(page, mediaPath, dateStr, timeStr) {
   await openComposerAndUpload(page, mediaPath, dateStr);
 
   await humanPause();
-  log('clicando em "Programar"…');
-  await clickByText(page, SEL.scheduleOptionButton, { what: "alternador Programar" });
+  // Passo 3: aba "Programar".
+  log('clicando na aba "Programar"…');
+  await clickProgramarTab(page);
   await sleep(800);
   await debugShot(page, "5_schedule_open");
 
+  // Passo 4: data e horario do Facebook e do Instagram.
+  log(`preenchendo data/horario (Facebook e Instagram): ${dateStr} ${timeStr}`);
   await fillScheduleDateTime(page, dateStr, timeStr);
   await debugShot(page, "6_schedule_filled");
 
+  await assertMediaAccepted(page, mediaPath);
+
+  // Passo 5: "Programar" do rodape, ao lado de "Cancelar".
   await humanPause();
   log(`confirmando agendamento para ${dateStr} ${timeStr}…`);
-  await clickFinalAction(page, { exactTexts: ["Programar", "Agendar", "Concluir", "Confirmar"], fallbackTexts: SEL.scheduleConfirmButton, what: "botao confirmar/compartilhar" });
+  await clickFooterProgramar(page);
 
-  await waitForConfirmation(page, { okTexts: SEL.scheduledConfirmationText, dateStr });
+  await waitForConfirmation(page, { okTexts: SEL.scheduledConfirmationText, dateStr }).catch(markAfterSubmit);
   log("story agendado ✓");
 }
 
@@ -411,10 +546,22 @@ async function pickCalendarDay(page, targetDate) {
     await sleep(300);
   }
 
+  // O mesmo numero aparece nos campos de hora/minuto (ex.: dia 12 com horario
+  // 12:00, ou dia 17 com a hora atual 17h): eles sao <label aria-hidden> por
+  // cima de um spinbutton e bloqueiam o clique. Pula esses e fica so com a
+  // casinha do mini-calendario.
   const cell = page.getByText(new RegExp(`^${day}$`), { exact: true });
   const n = await cell.count().catch(() => 0);
   for (let i = 0; i < n; i++) {
     const el = cell.nth(i);
+    const ehCampoDeHora = await el
+      .evaluate((node) => {
+        const label = node.closest("label[for]");
+        const alvo = label && document.getElementById(label.getAttribute("for"));
+        return Boolean(alvo && alvo.getAttribute("role") === "spinbutton") || Boolean(node.closest("[role='spinbutton']"));
+      })
+      .catch(() => false);
+    if (ehCampoDeHora) continue;
     if (await el.isVisible().catch(() => false)) {
       await humanClick(page, el);
       return true;
@@ -434,42 +581,66 @@ async function fillTimeSpinbuttons(page, hourSpin, minuteSpin, hh, mm) {
   await sleep(200);
 }
 
+// "Clica fora": clica no titulo "Criar story" do composer (texto parado, nao
+// e botao nem campo) pra fechar o mini-calendario e o Meta aceitar o valor
+// digitado. Sem o titulo na tela, clica num canto vazio no topo da pagina.
+async function clickOutside(page) {
+  const heading = page.getByText(/^Criar st[oó]ry$/i).first();
+  if (await heading.isVisible().catch(() => false)) {
+    await humanClick(page, heading);
+  } else {
+    const vp = page.viewportSize() || { width: 1440, height: 900 };
+    await page.mouse.click(Math.round(vp.width * 0.6), 20);
+  }
+  await sleep(600);
+}
+
 async function fillScheduleDateTime(page, dateStr, timeStr) {
   const targetDate = new Date(dateStr + "T00:00:00");
   const [hh, mm] = timeStr.split(":").map(Number);
 
-  const dateBoxes = page.getByRole("textbox");
-  const dateCount = await dateBoxes.count().catch(() => 0);
-  if (dateCount === 0) {
+  // Campos visiveis, na ordem da tela: [0] = Facebook, [1] = Instagram.
+  const dateBoxes = [];
+  const allText = page.getByRole("textbox");
+  for (let i = 0, n = await allText.count().catch(() => 0); i < n; i++) {
+    if (await allText.nth(i).isVisible().catch(() => false)) dateBoxes.push(allText.nth(i));
+  }
+  const spinList = [];
+  const allSpins = page.getByRole("spinbutton");
+  for (let i = 0, n = await allSpins.count().catch(() => 0); i < n; i++) {
+    if (await allSpins.nth(i).isVisible().catch(() => false)) spinList.push(allSpins.nth(i));
+  }
+  if (dateBoxes.length === 0) {
     log("aviso: nao achei nenhum campo de data (textbox) — o agendamento provavelmente vai usar a data padrao (hoje).");
   }
-
-  // Um textbox de data por plataforma ativa (Facebook e/ou Instagram), na
-  // mesma ordem em que aparecem na tela.
-  for (let i = 0; i < dateCount; i++) {
-    const box = dateBoxes.nth(i);
-    if (!(await box.isVisible().catch(() => false))) continue;
-    await humanClick(page, box);
-    await sleep(500);
-    const picked = await pickCalendarDay(page, targetDate);
-    if (!picked) {
-      log(`aviso: nao achei o dia ${targetDate.getDate()} no calendario (campo de data ${i}) — ele pode ter ficado com a data padrao.`);
-      await page.keyboard.press("Escape").catch(() => {});
-    }
-    await sleep(300);
-  }
-
-  const spins = page.getByRole("spinbutton");
-  const spinCount = await spins.count().catch(() => 0);
-  // Pares (hora, minuto) por plataforma, na mesma ordem dos campos de data.
-  for (let i = 0; i + 1 < spinCount; i += 2) {
-    const hourSpin = spins.nth(i);
-    const minuteSpin = spins.nth(i + 1);
-    if (!(await hourSpin.isVisible().catch(() => false))) continue;
-    await fillTimeSpinbuttons(page, hourSpin, minuteSpin, hh, mm);
-  }
-  if (spinCount === 0) {
+  if (spinList.length === 0) {
     log("aviso: nao achei nenhum campo de horario (spinbutton) — o agendamento provavelmente vai usar o horario padrao (agora).");
+  }
+
+  // Uma plataforma de cada vez: data -> horario -> clica fora. So depois
+  // passa pra proxima (Facebook primeiro, Instagram depois).
+  const labels = ["Facebook", "Instagram"];
+  const platforms = Math.max(dateBoxes.length, Math.floor(spinList.length / 2));
+  for (let i = 0; i < platforms; i++) {
+    const label = labels[i] || `plataforma ${i + 1}`;
+    log(`${label}: data ${dateStr}, horario ${timeStr}`);
+
+    if (dateBoxes[i]) {
+      await humanClick(page, dateBoxes[i]);
+      await sleep(500);
+      const picked = await pickCalendarDay(page, targetDate);
+      if (!picked) {
+        log(`aviso: nao achei o dia ${targetDate.getDate()} no calendario do ${label} — ele pode ter ficado com a data padrao.`);
+        await page.keyboard.press("Escape").catch(() => {});
+      }
+      await sleep(300);
+    }
+
+    if (spinList[2 * i] && spinList[2 * i + 1]) {
+      await fillTimeSpinbuttons(page, spinList[2 * i], spinList[2 * i + 1], hh, mm);
+    }
+
+    await clickOutside(page);
   }
 }
 
@@ -530,6 +701,15 @@ async function verificarAgendadoNoCalendario(page, dateStr) {
   return false;
 }
 
+// Erro que acontece DEPOIS do clique final (Programar/Compartilhar): o story
+// provavelmente ja foi enviado, so nao conseguimos confirmar. Tentar de novo
+// do zero agendaria o mesmo story duas vezes (foi o que encheu o Planner de
+// repetidos), entao o loop principal NAO repete esse item.
+function markAfterSubmit(err) {
+  err.afterSubmit = true;
+  throw err;
+}
+
 async function waitForConfirmation(page, { okTexts = SEL.confirmationText, dateStr } = {}) {
   const deadline = Date.now() + CONFIG.confirmTimeoutMs;
   const okRe = new RegExp(okTexts.map(escapeRe).join("|"), "i");
@@ -545,12 +725,12 @@ async function waitForConfirmation(page, { okTexts = SEL.confirmationText, dateS
       await debugShot(page, "6_confirmado");
       return;
     }
-    // Sinal alternativo: o composer fechou e voltou pro feed/calendario.
-    if (/\/latest\/(home|content_calendar)/.test(page.url())) {
-      if (!(await isComposerOpen(page))) {
-        await debugShot(page, "6_composer_fechou");
-        return;
-      }
+    // Sinal alternativo: o composer fechou sozinho depois do clique final.
+    // O Meta pode mandar pra qualquer tela (Pagina Inicial, calendario,
+    // Planner...), entao nao depende da URL — so do "Criar story" ter sumido.
+    if (!(await isComposerOpen(page))) {
+      await debugShot(page, "6_composer_fechou");
+      return;
     }
     await sleep(2000);
   }
@@ -631,13 +811,16 @@ export async function runBatch({ all = false, week = false, scheduleMode = false
     current: null,
     lastError: null,
     scheduleMode,
+    cancelRequested: false,
     items: queue.map((it) => ({ date: it.date, time: it.time, fileName: it.fileName, status: it.status }))
   });
 
   let { ctx, page, cdp } = await launch();
+  currentSession = { ctx, page, cdp };
   try {
     await ensureLoggedIn(page);
     for (let i = 0; i < queue.length; i++) {
+      if (PROGRESS.cancelRequested) break;
       const it = queue[i];
       log(`[${i + 1}/${queue.length}] ${it.date} ${it.time} -> ${it.fileName}`);
       PROGRESS.current = it.fileName;
@@ -645,16 +828,33 @@ export async function runBatch({ all = false, week = false, scheduleMode = false
       try {
         it.status = await executarItem(page, it, scheduleMode);
       } catch (err) {
+        if (PROGRESS.cancelRequested) break; // fechado de proposito pelo cancelamento — nao tenta de novo
         log("ERRO neste story:", err.message || err);
+        if (err.afterSubmit) {
+          // Ja clicou no botao final: repetir poderia duplicar o story.
+          it.status = "verificar";
+          it.error = "Botao final clicado, mas sem confirmacao — confira no Planner do Meta. " + String(err.message || err);
+          PROGRESS.items[i].status = "verificar";
+          PROGRESS.lastError = it.error;
+          saveAgenda(agenda, agendaFile);
+          log("o botao final ja tinha sido clicado — NAO vou repetir (evita story duplicado). Marcado como 'verificar'.");
+          if (i < queue.length - 1) {
+            const [a, b] = CONFIG.betweenStoriesDelayMs;
+            await sleepCancelable(rand(a, b));
+          }
+          continue;
+        }
         log("fechando o navegador e tentando esse dia de novo do zero, uma vez, antes de desistir…");
         if (cdp) await page.close().catch(() => {});
         else await ctx.close().catch(() => {});
         ({ ctx, page, cdp } = await launch());
+        currentSession = { ctx, page, cdp };
         try {
           await ensureLoggedIn(page);
           it.status = await executarItem(page, it, scheduleMode);
           log("recuperado na segunda tentativa ✓");
         } catch (err2) {
+          if (PROGRESS.cancelRequested) break; // idem, na segunda tentativa
           it.status = "erro";
           it.error = String(err2.message || err2);
           PROGRESS.items[i].status = "erro";
@@ -664,7 +864,7 @@ export async function runBatch({ all = false, week = false, scheduleMode = false
           log("marcando como erro e seguindo pro proximo dia da fila (nada mais e repetido pra esse).");
           if (i < queue.length - 1) {
             const [a, b] = CONFIG.betweenStoriesDelayMs;
-            await sleep(rand(a, b));
+            await sleepCancelable(rand(a, b));
           }
           continue;
         }
@@ -678,8 +878,21 @@ export async function runBatch({ all = false, week = false, scheduleMode = false
         const [a, b] = CONFIG.betweenStoriesDelayMs;
         const wait = rand(a, b);
         log(`aguardando ${Math.round(wait / 1000)}s antes do proximo…`);
-        await sleep(wait);
+        await sleepCancelable(wait);
       }
+    }
+
+    if (PROGRESS.cancelRequested) {
+      // Marca so o que ainda nao foi concluido; o que ja publicou/agendou ou
+      // ja deu erro antes do cancelamento fica como estava.
+      for (let i = 0; i < queue.length; i++) {
+        if (!["publicado", "agendado", "erro"].includes(queue[i].status)) {
+          queue[i].status = "cancelado";
+          PROGRESS.items[i].status = "cancelado";
+        }
+      }
+      saveAgenda(agenda, agendaFile);
+      log(`cancelado pelo usuario — ${PROGRESS.done}/${queue.length} ja tinham sido concluidos.`);
     }
   } finally {
     if (cdp) {
@@ -689,6 +902,7 @@ export async function runBatch({ all = false, week = false, scheduleMode = false
     } else {
       await ctx.close().catch(() => {});
     }
+    currentSession = null;
     PROGRESS.running = false;
     PROGRESS.current = null;
     PROGRESS.finishedAt = new Date().toISOString();

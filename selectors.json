@@ -1,38 +1,44 @@
 {
-  "_comment": "Textos/rotulos que o bot procura na interface do Meta Business Suite. A UI muda com frequencia e varia por idioma. Rode com \"debug\": true no config.json para gerar prints em ./debug e ajuste estes valores conforme o que aparecer na sua conta.",
+  "_comment": "Textos/rotulos que o bot procura na interface do Meta Business Suite. A UI muda com frequencia e varia por idioma. Rode com \"debug\": true no config.json para gerar prints em ./debug e ajuste estes valores conforme o que aparecer na sua conta. As chaves que comecam com _comment sao so explicacao — o bot ignora. Depois de editar, reinicie a API (npm run server).",
 
+  "_comment_createStoryButton": "PASSO 1 — Pagina Inicial do Meta. Texto do botao que abre a tela de criar story: 'Criar story'. Se der 'Nao achei o elemento: botao Criar story', o Meta mudou o nome do botao: troque o texto aqui.",
   "createStoryButton": [
-    "Storys",
-    "Story",
-    "História",
-    "Histórias",
-    "Criar história",
-    "Criar história (story)",
-    "Create story",
-    "Stories",
-    "Adicionar à história"
+    "Criar story"
   ],
 
+  "_comment_composerFileInput": "PASSO 2 (plano B) — Seletor CSS do campo escondido de envio de arquivo. So e usado se clicar em 'Adicionar foto/video' NAO abrir a janela de escolher arquivo do Windows; ai o bot joga o arquivo direto nesse campo.",
   "composerFileInput": "input[type=file]",
 
-  "addPhotoVideoButton": [
-    "Adicionar foto/vídeo",
-    "Foto/vídeo",
-    "Adicionar foto ou vídeo",
-    "Add photo or video",
-    "Carregar"
+  "_comment_mediaLoadingText": "PASSO 3 — Textos que aparecem ENQUANTO o Meta ainda esta carregando/processando o video (barra azul no preview). Enquanto qualquer um deles estiver na tela, o bot espera (ate mediaReadyTimeoutMs do config.json). Se faltar um texto aqui, o bot segue cedo demais e trava no botao final desabilitado.",
+  "mediaLoadingText": [
+    "Carregando mídia",
+    "A carregar mídia",
+    "Loading media",
+    "Uploading",
+    "Enviando mídia",
+    "Processando mídia",
+    "A processar mídia",
+    "Processing media"
   ],
 
+  "_comment_addPhotoVideoButton": "PASSO 2 — Dentro de 'Criar story', secao Midia. Botao 'Adicionar foto/vídeo'. O bot clica nele e responde a janela de arquivo sozinho com a midia do dia.",
+  "addPhotoVideoButton": [
+    "Adicionar foto/vídeo"
+  ],
+
+  "_comment_facebookPlacementToggle": "PASSO 4 — Destinos. Texto ao lado da caixinha/interruptor do Facebook. O bot confere se esta marcado conforme targets.facebook no config.json e marca/desmarca se precisar. Se o composer nao tiver essa opcao, e ignorado.",
   "facebookPlacementToggle": [
     "Facebook",
     "Página do Facebook"
   ],
 
+  "_comment_instagramPlacementToggle": "PASSO 4 — Destinos. Igual ao de cima, mas para o Instagram (targets.instagram no config.json).",
   "instagramPlacementToggle": [
     "Instagram",
     "Conta do Instagram"
   ],
 
+  "_comment_publishButton": "PASSO 5 (opcao 1 — publicar hoje) — Texto do botao final do rodape que publica na hora. So usado como plano B: o bot tenta primeiro o texto exato 'Compartilhar'/'Publicar' no rodape, pra nao clicar sem querer no alternador 'Compartilhar agora' la em cima.",
   "publishButton": [
     "Publicar",
     "Partilhar na história",
@@ -44,6 +50,7 @@
     "Publish"
   ],
 
+  "_comment_confirmationText": "PASSO 6 (opcao 1 — publicar hoje) — Mensagem que o Meta mostra depois que o story FOI PUBLICADO. Quando o bot ve um desses textos, marca o item como concluido e vai pro proximo. Tambem aceita como sucesso o composer fechar sozinho.",
   "confirmationText": [
     "história foi partilhada",
     "história foi publicada",
@@ -55,6 +62,7 @@
     "foi partilhado"
   ],
 
+  "_comment_errorText": "Qualquer passo depois do clique final — Mensagens de erro do Meta. Se aparecer uma delas, o bot para esse item na hora (marca erro) em vez de tentar de novo e arriscar publicar duplicado.",
   "errorText": [
     "Algo correu mal",
     "Something went wrong",
@@ -63,8 +71,9 @@
     "try again"
   ],
 
-  "_comment_schedule": "Usados so no modo --schedule (agenda direto no calendario do Meta em vez de publicar na hora). Confirmado no print de debug: dentro de 'Criar story' existe uma secao 'Programar' com alternador 'Compartilhar agora' / 'Programar' (nao um menu escondido). scheduleDateInput/scheduleTimeInput ainda sao palpite — ajuste com base no proximo print (5_schedule_open / 6_schedule_filled) se nao acertar de primeira.",
+  "_comment_schedule": "Daqui pra baixo: usados so no modo agendar (opcao 2 — '1 semana', ou agenda inteira), que programa direto no calendario do Meta em vez de publicar na hora. Dentro de 'Criar story' existe a secao 'Programar' com o alternador 'Compartilhar agora' / 'Programar'.",
 
+  "_comment_scheduleOptionButton": "NAO USADO HOJE. O passo 3 (clicar na aba 'Programar', a de cima, ao lado de 'Compartilhar agora') agora e fixo no codigo: clickProgramarTab em publish-stories.js. Mantido so como referencia.",
   "scheduleOptionButton": [
     "Programar",
     "Agendar",
@@ -73,10 +82,13 @@
     "Schedule post"
   ],
 
+  "_comment_scheduleDateInput": "NAO USADO HOJE. O bot acha os campos de data sozinho (caixas de texto da secao Programar) e escolhe o dia clicando no mini-calendario. Mantido so como referencia.",
   "scheduleDateInput": "input[type='date'], input[aria-label*='ata' i], input[placeholder*='ata' i]",
 
+  "_comment_scheduleTimeInput": "NAO USADO HOJE. O bot acha os campos de hora/minuto sozinho (os campinhos '12 : 00') e digita o horario. Mantido so como referencia.",
   "scheduleTimeInput": "input[type='time'], input[aria-label*='ora' i], input[placeholder*='ime' i]",
 
+  "_comment_scheduleConfirmButton": "NAO USADO HOJE. O passo 5 (clicar em 'Programar' no rodape, do lado direito de 'Cancelar') agora e fixo no codigo: clickFooterProgramar em publish-stories.js. Ele espera ate 2 min o botao habilitar; se continuar cinza, normalmente e video com mais de 30s ou midia que o Meta nao processou. Mantido so como referencia.",
   "scheduleConfirmButton": [
     "Compartilhar",
     "Programar",
@@ -88,6 +100,7 @@
     "Confirm"
   ],
 
+  "_comment_scheduledConfirmationText": "PASSO 7 (agendar) — Mensagem que o Meta mostra depois que o story FOI AGENDADO. Se nenhuma aparecer a tempo, o bot ainda confere no calendario do Meta se tem algo no dia certo antes de marcar erro.",
   "scheduledConfirmationText": [
     "história foi agendada",
     "story foi agendad",

@@ -3,3 +3,8 @@ chrome-profile/
 debug/
 agenda.json
 media/
+chrome-profile-backup-*/
+media-grandes/
+media-story/
+conversoes.json
+setup-new.log
