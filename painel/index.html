@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estúdio de Distribuição</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="console-bg">
+  <main class="login-shell">
+    <form class="panel" id="loginForm" autocomplete="off">
+      <div class="wordmark"><span class="sig"></span> Estúdio de Distribuição</div>
+      <p class="eyebrow">Sistema de publicação de vídeo</p>
+
+      <div class="field">
+        <label for="user">Usuário</label>
+        <input type="text" id="user" name="user" required autofocus>
+      </div>
+
+      <div class="field">
+        <label for="pass">Senha</label>
+        <input type="password" id="pass" name="pass" required>
+      </div>
+
+      <button type="submit" class="btn">Entrar</button>
+      <p class="msg" id="msg" role="alert"></p>
+
+      <div class="cred-hint">
+        Acesso de teste<br>
+        usuário: <b>admin</b><br>
+        senha: <b>VideoBot2026!</b>
+      </div>
+
+      <p class="foot-note">Gate local de demonstração — a validação roda no navegador.</p>
+    </form>
+  </main>
+</div>
+
+<script>
+  // --- Credenciais de demonstração (apenas front-end, sem segurança real) ---
+  const CREDENCIAIS = { user: "admin", pass: "VideoBot2026!" };
+
+  const form = document.getElementById("loginForm");
+  const msg = document.getElementById("msg");
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const u = document.getElementById("user").value.trim();
+    const p = document.getElementById("pass").value;
+
+    if (u === CREDENCIAIS.user && p === CREDENCIAIS.pass) {
+      msg.style.color = "var(--accent-2)";
+      msg.textContent = "Acesso liberado…";
+      sessionStorage.setItem("ed_sessao", "1");
+      setTimeout(() => { window.location.href = "dashboard.html"; }, 350);
+    } else {
+      msg.style.color = "var(--accent)";
+      msg.textContent = "Usuário ou senha inválidos.";
+    }
+  });
+</script>
+</body>
+</html>

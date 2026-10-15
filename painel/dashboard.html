@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel de Redes — Estúdio de Distribuição</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="console-bg">
+
+  <header class="topbar">
+    <div class="wordmark"><span class="sig"></span> Estúdio de Distribuição</div>
+    <div class="topbar-right">
+      <span class="status-chip"><span class="d"></span> Sessão ativa</span>
+      <button class="btn-ghost" id="sair">Sair</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="storys" id="storys">
+      <div class="storys-head">
+        <p class="eyebrow">Conteúdo dos storys</p>
+        <h2>Storys</h2>
+        <p>Área dedicada aos storys. Escolha a rede e selecione abaixo as mídias que o bot vai publicar como story.</p>
+      </div>
+
+      <p class="modal-sub">Rede disponível para storys</p>
+      <div class="storys-redes" id="storys-redes"></div>
+
+      <p class="modal-sub">Páginas dentro dessa conta empresarial</p>
+      <div class="field">
+        <label for="storys-meta-paginas">Página ativa (a que está recebendo os storys agora)</label>
+        <select id="storys-meta-paginas"></select>
+      </div>
+      <div class="storys-pagina-nova">
+        <input id="storys-pagina-nome" type="text" placeholder="Nome da página (ex.: Chacara Fortaleza Valinhos)">
+        <input id="storys-pagina-link" type="url" placeholder="Link do Meta Business Suite dessa página">
+        <button class="btn-ghost" id="storys-pagina-salvar" type="button">+ Salvar página</button>
+      </div>
+
+      <details class="storys-meta-avancado">
+        <summary>Link direto (avançado)</summary>
+        <div class="field">
+          <label for="storys-meta-url">Link do calendário / página do Meta Business Suite</label>
+          <input id="storys-meta-url" type="url" placeholder="https://business.facebook.com/latest/content_calendar?business_id=...&asset_id=...">
+        </div>
+        <p class="storys-meta-info" id="storys-meta-info">Cole o link da página onde os storys serão publicados.</p>
+      </details>
+
+      <label class="storys-drop" for="storys-input">
+        <input id="storys-input" type="file" accept="image/*,video/*" multiple hidden>
+        <span class="storys-drop-ico">+</span>
+        <span class="storys-drop-txt">Clique para selecionar imagens ou vídeos</span>
+        <span class="storys-drop-sub">Qualquer imagem ou vídeo — o bot converte pro formato do Meta (até 30 s)</span>
+      </label>
+
+      <div class="storys-grid" id="storys-grid"></div>
+
+      <p class="modal-sub">Agenda dos storys</p>
+      <div class="storys-config">
+        <div class="field">
+          <label for="storys-inicio">Início</label>
+          <input id="storys-inicio" type="text" inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="storys-fim">Fim</label>
+          <input id="storys-fim" type="text" inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="storys-hora">Horário</label>
+          <input id="storys-hora" type="time" value="12:00">
+        </div>
+        <div class="field">
+          <label for="storys-por-dia">Por dia</label>
+          <input id="storys-por-dia" type="number" min="1" max="10" value="1">
+        </div>
+      </div>
+
+      <div class="storys-foot">
+        <button class="btn btn-inline" id="storys-gerar">Gerar agenda</button>
+        <button class="btn-ghost" id="storys-json" hidden>Baixar JSON</button>
+        <button class="btn-ghost" id="storys-csv" hidden>Baixar CSV</button>
+        <button class="btn btn-inline" id="storys-publicar" disabled>Publicar storys</button>
+        <button class="btn-ghost" id="storys-remover">Cancelar e remover agendamento</button>
+        <button class="btn-ghost" id="storys-cancelar" hidden>Cancelar tudo</button>
+        <span class="storys-msg" id="storys-msg"></span>
+      </div>
+
+      <div class="storys-obs" id="storys-obs" hidden></div>
+
+      <div class="storys-agenda" id="storys-agenda"></div>
+    </section>
+
+    <p class="bar">O estado dos interruptores fica salvo neste navegador. A publicação real exige as chaves de API de cada plataforma — veja o README do projeto.</p>
+  </main>
+
+</div>
+
+<script>
+  // Protege a página: sem sessão, volta para o login.
+  if (sessionStorage.getItem("ed_sessao") !== "1") {
+    window.location.replace("index.html");
+  }
+
+  document.getElementById("sair").addEventListener("click", () => {
+    sessionStorage.removeItem("ed_sessao");
+    window.location.href = "index.html";
+  });
+
+  /* ---------- Storys: redes disponíveis ---------- */
+  const STORYS_REDES = [
+    { id: "business", nome: "Business", fmt: "Conta empresarial", cor: "#0B6E4F", ini: "BZ" }
+  ];
+  const SR_KEY = "ed_storys_redes";
+  const srAtivas = new Set(JSON.parse(localStorage.getItem(SR_KEY) || "[]"));
+  const storysRedes = document.getElementById("storys-redes");
+
+  STORYS_REDES.forEach((r) => {
+    const on = srAtivas.has(r.id);
+    const row = document.createElement("div");
+    row.className = "page-row";
+    row.innerHTML = `
+      <span class="dot" style="background:${r.cor}">${r.ini}</span>
+      <span class="page-txt">
+        <span class="name">${r.nome}</span><br>
+        <span class="fmt">${r.fmt}</span>
+      </span>
+      <label class="switch">
+        <input type="checkbox" ${on ? "checked" : ""} aria-label="Publicar storys em ${r.nome}">
+        <span class="track"></span>
+        <span class="thumb"></span>
+      </label>
+    `;
+    row.querySelector("input").addEventListener("change", (e) => {
+      if (e.target.checked) srAtivas.add(r.id); else srAtivas.delete(r.id);
+      localStorage.setItem(SR_KEY, JSON.stringify([...srAtivas]));
+    });
+    storysRedes.appendChild(row);
+  });
+
+  /* ---------- Storys: seleção de mídias ---------- */
+  const storysInput = document.getElementById("storys-input");
+  const storysGrid  = document.getElementById("storys-grid");
+  let storysMidias = [];
+
+  storysInput.addEventListener("change", () => {
+    [...storysInput.files].forEach((f) => storysMidias.push(f));
+    storysInput.value = "";
+    renderStorys();
+    invalidarAgenda();
+  });
+
+  function renderStorys() {
+    storysGrid.innerHTML = "";
+    if (!storysMidias.length) {
+      storysGrid.innerHTML = '<p class="storys-vazio">Nenhuma mídia selecionada ainda.</p>';
+      return;
+    }
+    storysMidias.forEach((file, i) => {
+      const url = URL.createObjectURL(file);
+      const ehVideo = file.type.startsWith("video");
+      const item = document.createElement("div");
+      item.className = "storys-item";
+      item.innerHTML = `
+        ${ehVideo
+          ? `<video src="${url}" muted playsinline></video>`
+          : `<img src="${url}" alt="${file.name}">`}
+        <button class="storys-remove" data-i="${i}" aria-label="Remover ${file.name}">&times;</button>
+        <span class="storys-nome">${file.name}</span>
+      `;
+      storysGrid.appendChild(item);
+    });
+    storysGrid.querySelectorAll(".storys-remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        storysMidias.splice(+btn.dataset.i, 1);
+        renderStorys();
+        invalidarAgenda();
+      });
+    });
+  }
+
+  renderStorys();
+
+  const storysMsg = document.getElementById("storys-msg");
+
+  /* ---------- Storys: destino no Meta ---------- */
+  const META_KEY = "ed_storys_meta";
+  const elMetaUrl  = document.getElementById("storys-meta-url");
+  const elMetaInfo = document.getElementById("storys-meta-info");
+
+  function parseMeta(url) {
+    let businessId = "", assetId = "";
+    try {
+      const u = new URL(url);
+      businessId = u.searchParams.get("business_id") || "";
+      assetId = u.searchParams.get("asset_id") || "";
+    } catch { /* url incompleta */ }
+    return { url: url.trim(), businessId, assetId };
+  }
+
+  function renderMetaInfo(m) {
+    if (!m.url) {
+      elMetaInfo.textContent = "Cole o link da página onde os storys serão publicados.";
+      elMetaInfo.className = "storys-meta-info";
+    } else if (m.businessId && m.assetId) {
+      elMetaInfo.textContent = `Destino identificado — business_id ${m.businessId} · asset_id ${m.assetId}`;
+      elMetaInfo.className = "storys-meta-info ok";
+    } else {
+      elMetaInfo.textContent = "Link salvo, mas não achei business_id / asset_id nele. Confira se copiou o link completo do calendário.";
+      elMetaInfo.className = "storys-meta-info erro";
+    }
+  }
+
+  let metaDestino = parseMeta(localStorage.getItem(META_KEY + "_url") || "");
+  elMetaUrl.value = metaDestino.url;
+  renderMetaInfo(metaDestino);
+
+  elMetaUrl.addEventListener("input", () => {
+    metaDestino = parseMeta(elMetaUrl.value);
+    localStorage.setItem(META_KEY + "_url", metaDestino.url);
+    localStorage.setItem(META_KEY, JSON.stringify(metaDestino));
+    renderMetaInfo(metaDestino);
+    renderPaginasSelect();
+  });
+
+  /* ---------- Storys: paginas salvas (trocar de conta/pagina do Meta) ---------- */
+  const PAGINAS_KEY = "ed_paginas_meta";
+  const elPaginasSelect = document.getElementById("storys-meta-paginas");
+  const elPaginaNome    = document.getElementById("storys-pagina-nome");
+  const elPaginaLink    = document.getElementById("storys-pagina-link");
+  const btnPaginaSalvar = document.getElementById("storys-pagina-salvar");
+
+  function lerPaginas() {
+    try { return JSON.parse(localStorage.getItem(PAGINAS_KEY) || "[]"); }
+    catch { return []; }
+  }
+  function salvarPaginas(lista) {
+    localStorage.setItem(PAGINAS_KEY, JSON.stringify(lista));
+  }
+
+  // Primeira vez: ja deixa cadastradas as duas paginas que a gente ja usou,
+  // pra nao precisar colar o link de novo.
+  if (!localStorage.getItem(PAGINAS_KEY)) {
+    salvarPaginas([
+      { nome: "Debroi Eventos", url: "https://business.facebook.com/latest/home?business_id=101785859634099&asset_id=155843388304954" },
+      { nome: "Chacara Fortaleza Valinhos", url: "https://business.facebook.com/latest/home?business_id=2431298000230313&asset_id=1997687257225597" }
+    ]);
+  }
+
+  function renderPaginasSelect() {
+    const paginas = lerPaginas();
+    elPaginasSelect.innerHTML = paginas.map((p) => {
+      const m = parseMeta(p.url);
+      const ativa = m.businessId === metaDestino.businessId && m.assetId === metaDestino.assetId && m.businessId;
+      return `<option value="${p.url}" ${ativa ? "selected" : ""}>${p.nome}${ativa ? " (ativa agora)" : ""}</option>`;
+    }).join("") || `<option value="">Nenhuma página salva ainda</option>`;
+  }
+  renderPaginasSelect();
+
+  elPaginasSelect.addEventListener("change", () => {
+    if (!elPaginasSelect.value) return;
+    elMetaUrl.value = elPaginasSelect.value;
+    metaDestino = parseMeta(elMetaUrl.value);
+    localStorage.setItem(META_KEY + "_url", metaDestino.url);
+    localStorage.setItem(META_KEY, JSON.stringify(metaDestino));
+    renderMetaInfo(metaDestino);
+    renderPaginasSelect();
+  });
+
+  btnPaginaSalvar.addEventListener("click", () => {
+    const nome = elPaginaNome.value.trim();
+    const link = elPaginaLink.value.trim();
+    if (!nome || !link) {
+      storysMsg.textContent = "Preencha o nome e o link da página antes de salvar.";
+      storysMsg.className = "storys-msg erro";
+      return;
+    }
+    const paginas = lerPaginas();
+    paginas.push({ nome, url: link });
+    salvarPaginas(paginas);
+    elPaginaNome.value = "";
+    elPaginaLink.value = "";
+    renderPaginasSelect();
+    storysMsg.textContent = `Página "${nome}" salva.`;
+    storysMsg.className = "storys-msg ok";
+  });
+
+  /* ---------- Storys: gerador de agenda ---------- */
+  const elInicio  = document.getElementById("storys-inicio");
+  const elFim     = document.getElementById("storys-fim");
+  const elHora    = document.getElementById("storys-hora");
+  const elPorDia  = document.getElementById("storys-por-dia");
+  const elAgenda  = document.getElementById("storys-agenda");
+  const btnJson   = document.getElementById("storys-json");
+  const btnCsv    = document.getElementById("storys-csv");
+  let agendaStorys = [];
+
+  // A agenda "simulada" (gerada por "Gerar agenda") é obrigatória antes de
+  // publicar. Qualquer mudança que a invalide (mídia ou config de agenda)
+  // trava o botão "Publicar storys" de novo até rodar "Gerar agenda".
+  function invalidarAgenda() {
+    agendaStorys = [];
+    document.getElementById("storys-publicar").disabled = true;
+    btnJson.hidden = true;
+    btnCsv.hidden = true;
+  }
+
+  [elInicio, elFim, elHora, elPorDia].forEach((el) => {
+    el.addEventListener("input", invalidarAgenda);
+  });
+
+  // Datas em dd/mm/aaaa (formato brasileiro) nos campos — nao usa o seletor
+  // nativo type="date" porque o formato dele segue o idioma do navegador
+  // (podia aparecer mm/dd/aaaa e confundir o dia com o mes). Guarda em ISO
+  // (AAAA-MM-DD) so internamente, pra ordenar/comparar sem ambiguidade.
+  function isoLocal(d) {
+    const semFuso = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return semFuso.toISOString().slice(0, 10);
+  }
+  function brLocal(d) {
+    return isoLocal(d).split("-").reverse().join("/");
+  }
+  // Converte "dd/mm/aaaa" digitado em Date (meia-noite local); retorna null
+  // se o texto nao estiver nesse formato ou a data nao existir de verdade
+  // (ex.: 31/02 — new Date rola pro mes seguinte sozinho, entao confere igual
+  // ao que foi digitado em vez de confiar cegamente no que o Date devolveu).
+  function parseBR(texto) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((texto || "").trim());
+    if (!m) return null;
+    const [, dd, mm, aaaa] = m;
+    const d = new Date(`${aaaa}-${mm}-${dd}T00:00:00`);
+    if (isNaN(d) || d.getDate() !== +dd || d.getMonth() !== +mm - 1 || d.getFullYear() !== +aaaa) return null;
+    return d;
+  }
+  // Formata enquanto digita: só números, insere as barras sozinho (dd/mm/aaaa).
+  function mascaraData(el) {
+    el.addEventListener("input", () => {
+      const digitos = el.value.replace(/\D/g, "").slice(0, 8);
+      let saida = digitos.slice(0, 2);
+      if (digitos.length > 2) saida += "/" + digitos.slice(2, 4);
+      if (digitos.length > 4) saida += "/" + digitos.slice(4, 8);
+      el.value = saida;
+    });
+  }
+  mascaraData(elInicio);
+  mascaraData(elFim);
+
+  // Datas padrão: de hoje até hoje + 10 dias.
+  function definirDatasPadrao() {
+    const hoje = new Date();
+    const fim = new Date(hoje);
+    fim.setDate(fim.getDate() + 10);
+    elInicio.value = brLocal(hoje);
+    elFim.value    = brLocal(fim);
+    invalidarAgenda();
+  }
+  definirDatasPadrao();
+  // O Chrome pode restaurar a aba (voltar/avançar, aba reaberta) sem rodar
+  // os scripts de novo — "pageshow" com persisted:true e a unica forma
+  // confiavel de detectar isso e resetar os campos pra hoje de novo, senao
+  // uma data antiga digitada ha dias pode reaparecer sem o usuario notar.
+  window.addEventListener("pageshow", (ev) => {
+    if (ev.persisted) definirDatasPadrao();
+  });
+
+  function embaralhar(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // Sorteia índices de mídia sem repetir muito: percorre um "baralho"
+  // embaralhado e, ao reembaralhar, evita que a última repita na sequência.
+  function sortearSequencia(qtdMidias, quantos) {
+    const seq = [];
+    let deck = [];
+    let ultimo = -1;
+    for (let n = 0; n < quantos; n++) {
+      if (deck.length === 0) {
+        deck = embaralhar([...Array(qtdMidias).keys()]);
+        if (qtdMidias > 1 && deck[0] === ultimo) deck.push(deck.shift());
+      }
+      const idx = deck.shift();
+      ultimo = idx;
+      seq.push(idx);
+    }
+    return seq;
+  }
+
+  function gerarAgenda() {
+    if (!storysMidias.length) {
+      storysMsg.textContent = "Selecione as mídias antes de gerar a agenda.";
+      storysMsg.className = "storys-msg erro";
+      return;
+    }
+    const ini = parseBR(elInicio.value);
+    const fim = parseBR(elFim.value);
+    if (!ini || !fim || fim < ini) {
+      storysMsg.textContent = "Confira as datas de início e fim (formato dd/mm/aaaa).";
+      storysMsg.className = "storys-msg erro";
+      return;
+    }
+    const hojeMeiaNoite = new Date(); hojeMeiaNoite.setHours(0, 0, 0, 0);
+    if (ini < hojeMeiaNoite) {
+      // Data recalculada agora, não confia no valor que já estava no campo —
+      // o Meta não deixa agendar em dia passado, então nem monta a prévia.
+      storysMsg.textContent = `A data de início (${elInicio.value}) já passou — atualize para hoje (${brLocal(new Date())}) ou depois.`;
+      storysMsg.className = "storys-msg erro";
+      return;
+    }
+    const porDia = Math.max(1, Math.min(10, +elPorDia.value || 1));
+    const hora = elHora.value || "12:00";
+
+    // Lista de dias no intervalo.
+    const dias = [];
+    for (let d = new Date(ini); d <= fim; d.setDate(d.getDate() + 1)) {
+      dias.push(new Date(d));
+    }
+
+    const total = dias.length * porDia;
+    const seq = sortearSequencia(storysMidias.length, total);
+
+    agendaStorys = [];
+    let k = 0;
+    dias.forEach((dia) => {
+      for (let p = 0; p < porDia; p++) {
+        const idx = seq[k++];
+        const iso = dia.toISOString().slice(0, 10);
+        agendaStorys.push({
+          data: iso,
+          horario: hora,
+          arquivo: storysMidias[idx].name,
+          midiaIndex: idx,
+          status: "pendente"
+        });
+      }
+    });
+
+    renderAgenda();
+    btnJson.hidden = false;
+    btnCsv.hidden = false;
+    document.getElementById("storys-publicar").disabled = false;
+    // Intervalo por extenso no resumo — a causa mais comum de erro aqui foi
+    // o campo de data ficar com um valor antigo sem o usuario perceber.
+    storysMsg.textContent = `${agendaStorys.length} storys agendados de ${elInicio.value} a ${elFim.value} (${dias.length} dia(s), ${porDia}/dia).`;
+    storysMsg.className = "storys-msg ok";
+  }
+
+  const STATUS_LABEL = {
+    publicado: "Publicado",
+    agendado: "Agendado",
+    publicando: "Publicando…",
+    agendando: "Agendando…",
+    pendente: "Pendente",
+    erro: "Erro",
+    verificar: "Verificar no Meta",
+    cancelado: "Cancelado"
+  };
+
+  function renderAgenda() {
+    if (!agendaStorys.length) { elAgenda.innerHTML = ""; return; }
+    const linhas = agendaStorys.map((a, i) => {
+      const status = a.status || "pendente";
+      return `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${a.data.split("-").reverse().join("/")}</td>
+        <td>${a.horario}</td>
+        <td>${a.arquivo}</td>
+        <td><span class="status-pill status-${status}">${STATUS_LABEL[status] || status}</span></td>
+      </tr>
+    `;
+    }).join("");
+    elAgenda.innerHTML = `
+      <table class="agenda-tab">
+        <thead><tr><th>#</th><th>Data</th><th>Hora</th><th>Arquivo</th><th>Status</th></tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    `;
+  }
+
+  // Busca a agenda real do bot local (com o status verdadeiro de cada dia —
+  // publicado, agendado, pendente ou erro) e substitui a tabela de prévia por
+  // ela. Sem isso, a tabela só mostrava o que ia ser enviado, nunca o que já
+  // foi de fato publicado/agendado no Meta.
+  async function carregarAgendaReal() {
+    try {
+      const agenda = await (await fetch(`${BOT_API}/agenda`)).json();
+      if (!agenda.items || !agenda.items.length) return;
+      agendaStorys = agenda.items.map((it) => ({
+        data: it.date,
+        horario: it.time,
+        arquivo: it.fileName,
+        status: it.status || "pendente"
+      }));
+      renderAgenda();
+    } catch { /* bot local nao esta rodando; mantem a previa atual */ }
+  }
+
+  function baixar(nome, conteudo, tipo) {
+    const blob = new Blob([conteudo], { type: tipo });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nome;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  btnJson.addEventListener("click", () => {
+    baixar("agenda-storys.json", JSON.stringify(agendaStorys, null, 2), "application/json");
+  });
+  btnCsv.addEventListener("click", () => {
+    const linhas = [["data", "horario", "arquivo"]]
+      .concat(agendaStorys.map((a) => [a.data, a.horario, a.arquivo]));
+    const csv = linhas.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    baixar("agenda-storys.csv", csv, "text/csv");
+  });
+
+  document.getElementById("storys-gerar").addEventListener("click", gerarAgenda);
+
+  /* ---------- Storys: botão publicar (chama o bot local direto) ---------- */
+
+  const BOT_API = "http://localhost:4599";
+  const btnPublicar = document.getElementById("storys-publicar");
+  const btnCancelar = document.getElementById("storys-cancelar");
+  const btnRemover  = document.getElementById("storys-remover");
+  let pollStatus = null;
+
+  // Mostra a agenda real (com status) assim que a página abre, se o bot
+  // local estiver rodando — assim os dias já publicados/agendados aparecem
+  // mesmo sem gerar uma prévia nova. Continua consultando de tempos em tempos
+  // pra tabela acompanhar o status real sem precisar dar F5 na página — só
+  // não faz isso se tiver uma prévia recém-gerada esperando pra ser
+  // publicada (senão ela some da tela antes de você conseguir publicar).
+  carregarAgendaReal();
+  setInterval(() => {
+    if (!btnPublicar.disabled) return;
+    carregarAgendaReal();
+  }, 6000);
+
+  // Se a página abrir (ou for recarregada) com uma publicação já em
+  // andamento — iniciada antes do F5, ou por outra aba — reconecta o
+  // acompanhamento e mostra o botão de cancelar em vez de deixar tudo
+  // parado até o usuário adivinhar que precisa gerar a agenda de novo.
+  (async function reconectarSeJaEstiverRodando() {
+    try {
+      const h = await fetch(`${BOT_API}/health`).then((r) => r.json());
+      if (h.running) {
+        btnPublicar.disabled = true;
+        btnCancelar.hidden = false;
+        btnCancelar.disabled = false;
+        acompanharProgresso();
+      }
+    } catch { /* bot local nao esta rodando */ }
+  })();
+
+  function msg(txt, cls) {
+    storysMsg.textContent = txt;
+    storysMsg.className = "storys-msg" + (cls ? " " + cls : "");
+  }
+
+  // O bot converte sozinho o que o Meta nao aceita (webp/heic -> jpg; video
+  // longo, pesado ou em formato antigo -> H.264 de ate 30 s).
+  async function enviarMidias() {
+    const convertidos = [];
+    for (const [i, file] of storysMidias.entries()) {
+      msg(`Enviando ${i + 1}/${storysMidias.length}: ${file.name} (convertendo se precisar)…`);
+      const r = await fetch(`${BOT_API}/upload?name=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file
+      });
+      if (!r.ok) {
+        let detalhe = "";
+        try { detalhe = (await r.json()).error || ""; } catch { /* resposta sem JSON */ }
+        throw new Error(`falha ao enviar ${file.name}${detalhe ? " — " + detalhe : ""}`);
+      }
+      const info = await r.json().catch(() => ({}));
+      if (info.convertido) convertidos.push({ de: file.name, para: info.saved, motivo: info.motivo });
+    }
+    mostrarObservacoes(convertidos);
+    return convertidos;
+  }
+
+  // Observacoes: quais arquivos o bot converteu e por que (ex.: codificador
+  // H.265/HEVC em vez de H.264). Fica separado do storysMsg porque o
+  // acompanhamento de progresso sobrescreve aquela linha a cada 2 s.
+  const storysObs = document.getElementById("storys-obs");
+  function mostrarObservacoes(lista) {
+    storysObs.innerHTML = "";
+    storysObs.hidden = !lista.length;
+    if (!lista.length) return;
+    const titulo = document.createElement("p");
+    titulo.className = "storys-obs-titulo";
+    titulo.textContent = `Observação — ${lista.length} arquivo(s) convertido(s) automaticamente pro formato do Meta:`;
+    const ul = document.createElement("ul");
+    for (const c of lista) {
+      const li = document.createElement("li");
+      li.textContent = `${c.de}${c.para !== c.de ? " → " + c.para : ""}: ${c.motivo}`;
+      ul.appendChild(li);
+    }
+    storysObs.append(titulo, ul);
+  }
+
+  function acompanharProgresso() {
+    clearInterval(pollStatus);
+    pollStatus = setInterval(async () => {
+      try {
+        const s = await (await fetch(`${BOT_API}/status`)).json();
+        if (s.total) {
+          const atual = s.current ? ` — enviando ${s.current}` : "";
+          msg(`${s.scheduleMode ? "Agendando" : "Publicando"} ${s.done}/${s.total}${atual}`, "ok");
+          // Atualiza a tabela com o status de cada dia conforme o bot avança.
+          agendaStorys = s.items.map((it) => ({
+            data: it.date, horario: it.time, arquivo: it.fileName, status: it.status
+          }));
+          renderAgenda();
+        }
+        if (!s.running && s.finishedAt) {
+          clearInterval(pollStatus);
+          btnCancelar.hidden = true;
+          btnCancelar.disabled = false;
+          // Agenda já foi consumida (publicada ou parou com erro): exige
+          // gerar uma nova agenda simulada antes de liberar o botão de novo.
+          invalidarAgenda();
+          carregarAgendaReal();
+          if (s.cancelRequested) msg(`Cancelado: ${s.done}/${s.total} já tinham sido concluídos antes do cancelamento. Gere a agenda de novo para continuar o restante.`, "erro");
+          else if (s.lastError) msg(`Parou: ${s.lastError} — gere a agenda de novo para tentar outra vez.`, "erro");
+          else msg(`Concluído: ${s.done}/${s.total} storys processados. Gere a agenda de novo para publicar/agendar mais.`, "ok");
+        }
+      } catch { /* servidor caiu; para de tentar no próximo erro */ }
+    }, 2500);
+  }
+
+  btnPublicar.addEventListener("click", async () => {
+    if (!srAtivas.size)      return msg("Selecione ao menos uma rede para os storys.", "erro");
+    if (!metaDestino.url)    return msg("Cole o link do Meta Business Suite em \"Destino no Meta\".", "erro");
+    if (!storysMidias.length) return msg("Selecione ao menos uma mídia.", "erro");
+    if (!agendaStorys.length) return msg("Clique em \"Gerar agenda\" antes de publicar.", "erro");
+
+    // Sempre agenda a AGENDA INTEIRA direto no calendário do Meta (opção 3) —
+    // sem perguntar, por pedido do usuário.
+    const mode = "all";
+    const scheduleMode = true;
+
+    btnPublicar.disabled = true;
+    msg("Conferindo o bot local…", "ok");
+    try {
+      const h = await fetch(`${BOT_API}/health`).then((r) => r.json());
+      if (h.running) { btnPublicar.disabled = false; return msg("O bot já está publicando. Aguarde terminar.", "erro"); }
+    } catch {
+      btnPublicar.disabled = false;
+      return msg("Bot local não respondeu. Rode \"npm run server\" na pasta story-bot.", "erro");
+    }
+
+    try {
+      msg("Enviando mídias para o bot…", "ok");
+      const convertidos = await enviarMidias();
+
+      msg(`Iniciando publicação no Meta…${convertidos.length ? ` (${convertidos.length} arquivo(s) convertido(s) automaticamente pro formato do Meta)` : ""}`, "ok");
+      const r = await fetch(`${BOT_API}/publicar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          meta: metaDestino,
+          schedule: {
+            startDate: (parseBR(elInicio.value) && isoLocal(parseBR(elInicio.value))) || "today",
+            endDate: (parseBR(elFim.value) && isoLocal(parseBR(elFim.value))) || "endOfMonth",
+            perDay: Math.max(1, +elPorDia.value || 1),
+            time: elHora.value || "12:00"
+          },
+          targets: { facebook: true, instagram: true },
+          items: agendaStorys.map((a) => ({ date: a.data, time: a.horario, fileName: a.arquivo })),
+          mode,
+          scheduleMode,
+          days: 7
+        })
+      });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || "erro ao iniciar");
+
+      const labelMap = { today: "hoje", week: "próximos 7 dias", all: "agenda inteira" };
+      const acao = scheduleMode ? "Agendamento no Meta iniciado" : "Publicação iniciada";
+      msg(`${acao}: ${out.total} storys (${labelMap[out.mode] || out.mode}).`, "ok");
+      btnCancelar.hidden = false;
+      btnCancelar.disabled = false;
+      acompanharProgresso();
+    } catch (err) {
+      // Nao reabilita o Publicar com a MESMA agenda: se ela falhou (ex.: data
+      // passada, midia faltando), clicar de novo sem gerar uma nova so repete
+      // o mesmo erro pra sempre. Forca "Gerar agenda" antes de tentar outra vez.
+      invalidarAgenda();
+      renderAgenda();
+      msg("Falhou: " + (err.message || err) + " — clique em \"Gerar agenda\" e confira antes de tentar de novo.", "erro");
+    }
+  });
+
+  btnCancelar.addEventListener("click", async () => {
+    if (!confirm("Cancelar tudo? O item em andamento é interrompido e o resto da agenda fica marcado como cancelado — nada que já foi publicado/agendado é desfeito.")) return;
+    btnCancelar.disabled = true;
+    msg("Cancelando…", "ok");
+    try {
+      const r = await fetch(`${BOT_API}/cancelar`, { method: "POST" });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || "erro ao cancelar");
+      msg("Cancelamento pedido — aguardando o bot parar…", "ok");
+      // acompanharProgresso() já está rodando desde que a publicação começou;
+      // quando s.running virar false ela mesma esconde o botão e atualiza a tabela.
+    } catch (err) {
+      btnCancelar.disabled = false;
+      msg("Falhou ao cancelar: " + (err.message || err), "erro");
+    }
+  });
+
+  btnRemover.addEventListener("click", async () => {
+    if (!confirm("Cancelar a publicação em andamento (se houver) e apagar toda a agenda salva? Isso limpa a tabela — o que já foi publicado/agendado de verdade no Meta não é desfeito. Você vai precisar clicar em \"Gerar agenda\" de novo antes de publicar.")) return;
+    btnRemover.disabled = true;
+    btnPublicar.disabled = true;
+    msg("Removendo agendamento…", "ok");
+    try {
+      const r = await fetch(`${BOT_API}/agenda/limpar`, { method: "POST" });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || "erro ao remover agendamento");
+      clearInterval(pollStatus);
+      btnCancelar.hidden = true;
+      btnCancelar.disabled = false;
+      invalidarAgenda();
+      agendaStorys = [];
+      renderAgenda();
+      msg(out.cancelledFirst
+        ? "Publicação cancelada e agendamento removido. Selecione mídias/datas e clique em \"Gerar agenda\" para montar uma nova."
+        : "Agendamento removido. Selecione mídias/datas e clique em \"Gerar agenda\" para montar uma nova.", "ok");
+    } catch (err) {
+      msg("Falhou ao remover agendamento: " + (err.message || err), "erro");
+    } finally {
+      btnRemover.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
