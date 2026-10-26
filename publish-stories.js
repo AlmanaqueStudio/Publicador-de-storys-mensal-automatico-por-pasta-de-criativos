@@ -80,6 +80,75 @@ const log = (...a) => console.log(new Date().toLocaleTimeString(), "-", ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rand = (min, max) => Math.floor(min + Math.random() * (max - min));
 
+// Evita duas verificacoes ao mesmo tempo (duas abririam o mesmo chrome-profile
+// em paralelo e uma delas falharia por lock de perfil).
+let contaCheckEmAndamento = false;
+
+// Usado pelo dashboard (painel/dashboard.html, via server.js) para mostrar
+// qual conta/pagina esta logada no perfil isolado do bot. Abre uma janela
+// headless curta no mesmo chrome-profile do "npm run setup", entra na pagina
+// inicial do Business Suite (CONFIG.homeUrl) e le o primeiro heading (nome da
+// pagina, ex.: "Debroi Eventos") + a foto dela (primeira imagem de
+// scontent.*.fbcdn.net — a foto de perfil — perto desse heading, ignorando
+// icones de rede static.xx.fbcdn.net e a foto de capa, bem maior).
+export async function getLoggedInAccount() {
+  if (CONFIG.cdp && CONFIG.cdp.enabled) {
+    return { checked: false, reason: "modo cdp ativo — essa verificacao so funciona com o perfil isolado padrao" };
+  }
+  if (PROGRESS.running) {
+    return { checked: false, reason: "bot publicando agora — tente de novo quando terminar" };
+  }
+  if (contaCheckEmAndamento) {
+    return { checked: false, reason: "ja verificando — aguarde" };
+  }
+
+  const userDataDir = path.resolve(__dirname, CONFIG.profileDir);
+  if (!fs.existsSync(userDataDir)) {
+    return { checked: true, loggedIn: false, reason: 'nenhum login feito ainda — rode "npm run setup"' };
+  }
+
+  contaCheckEmAndamento = true;
+  let ctx;
+  try {
+    ctx = await chromium.launchPersistentContext(userDataDir, { headless: true, channel: "chrome" });
+    const page = await ctx.newPage();
+    await page.goto(CONFIG.homeUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
+
+    const heading = page.locator('[role="heading"]').first();
+    const achou = await heading.waitFor({ state: "visible", timeout: 15000 }).then(() => true).catch(() => false);
+    if (!achou || /login|checkpoint/i.test(page.url())) {
+      return { checked: true, loggedIn: false, reason: 'sessao expirada ou nao logada — rode "npm run setup" de novo' };
+    }
+
+    const nome = ((await heading.textContent().catch(() => "")) || "").trim() || null;
+    const foto = await page.evaluate(() => {
+      const h = document.querySelector('[role="heading"]');
+      let node = h;
+      for (let up = 0; node && up < 6; up++) {
+        const img = [...node.querySelectorAll("img")].find((im) => {
+          try {
+            return new URL(im.src).host.startsWith("scontent") && im.naturalWidth >= 32 && im.naturalWidth <= 150;
+          } catch { return false; }
+        });
+        if (img) return img.src;
+        node = node.parentElement;
+      }
+      return null;
+    }).catch(() => null);
+
+    return { checked: true, loggedIn: true, nome, foto };
+  } catch (err) {
+    const raw = String(err.message || err);
+    const reason = /has been closed|already in use|SingletonLock/i.test(raw)
+      ? 'nao consegui abrir o perfil agora — provavelmente outro Chrome do bot (ex.: "npm run setup") ainda esta aberto nele. Feche-o e tente de novo.'
+      : raw.split("\n")[0];
+    return { checked: true, loggedIn: null, reason };
+  } finally {
+    contaCheckEmAndamento = false;
+    if (ctx) await ctx.close().catch(() => {});
+  }
+}
+
 // Como o sleep() entre storys (config: betweenStoriesDelayMs, 15-45s) e o mais
 // longo do fluxo, esperar em pedacos pequenos deixa o cancelamento reagir em
 // no maximo 500ms em vez de so no proximo item.
@@ -909,23 +978,41 @@ export async function runBatch({ all = false, week = false, scheduleMode = false
   }
 }
 
-async function doSetup() {
+// Evita duas janelas de setup ao mesmo tempo (ex.: dois cliques em "Conectar
+// Facebook" no painel) — a segunda abriria o mesmo chrome-profile em paralelo
+// e falharia por lock de perfil.
+let setupEmAndamento = false;
+
+export function isSetupEmAndamento() {
+  return setupEmAndamento;
+}
+
+export async function doSetup() {
+  if (setupEmAndamento) {
+    log("setup ja esta aberto — aguarde fechar a janela atual.");
+    return;
+  }
   if (CONFIG.cdp && CONFIG.cdp.enabled) {
     log("modo CDP ativo: nao precisa de setup. O bot usa o login que ja esta no seu Chrome.");
     log("so confira que o Chrome esta aberto com --remote-debugging-port (veja o README) e rode: npm run run");
     return;
   }
+  setupEmAndamento = true;
   log("abrindo o Chrome. Faca login na conta do Facebook/Meta que administra a pagina alvo.");
   log("quando terminar de logar e ver o Meta Business Suite, feche a janela.");
-  const { ctx, page } = await launch();
   try {
-    await page.goto("https://business.facebook.com/", { waitUntil: "domcontentloaded", timeout: 30000 });
-  } catch (err) {
-    log("AVISO: nao consegui abrir business.facebook.com automaticamente:", err.message || err);
-    log("a aba abriu em about:blank — cole esse link manualmente na barra de endereco e faca o login la mesmo.");
+    const { ctx, page } = await launch();
+    try {
+      await page.goto("https://business.facebook.com/", { waitUntil: "domcontentloaded", timeout: 30000 });
+    } catch (err) {
+      log("AVISO: nao consegui abrir business.facebook.com automaticamente:", err.message || err);
+      log("a aba abriu em about:blank — cole esse link manualmente na barra de endereco e faca o login la mesmo.");
+    }
+    await new Promise((resolve) => ctx.on("close", resolve));
+    log("perfil salvo em", CONFIG.profileDir, "- proximos comandos ja entram logados.");
+  } finally {
+    setupEmAndamento = false;
   }
-  await new Promise((resolve) => ctx.on("close", resolve));
-  log("perfil salvo em", CONFIG.profileDir, "- proximos comandos ja entram logados.");
 }
 
 export function doPlan() {

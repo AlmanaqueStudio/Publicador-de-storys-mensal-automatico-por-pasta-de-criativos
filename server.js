@@ -10,18 +10,20 @@
 //   GET  /status              -> progresso da execucao atual
 //   POST /cancelar            -> pede pra parar a execucao atual (nao repete nem publica o restante)
 //   POST /agenda/limpar       -> cancela (se estiver rodando) e apaga a agenda salva, pra montar outra do zero
+//   GET  /conta                -> qual conta do Facebook esta logada no perfil do bot
 
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG, PROGRESS, setRunConfig, runBatch, requestCancel } from "./publish-stories.js";
+import { CONFIG, PROGRESS, setRunConfig, runBatch, requestCancel, getLoggedInAccount, doSetup, isSetupEmAndamento } from "./publish-stories.js";
 import { saveAgenda } from "./agenda.js";
 import { prepararParaMeta } from "./media-convert.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = 4599;
 const MEDIA_DIR = path.resolve(__dirname, CONFIG.mediaDir);
+const PROFILE_DIR = path.resolve(__dirname, CONFIG.profileDir);
 const AGENDA_FILE = path.join(__dirname, "agenda.json");
 const FFMPEG = CONFIG.ffmpegPath || "ffmpeg";
 
@@ -159,6 +161,26 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/status") {
       return sendJson(res, 200, PROGRESS);
+    }
+
+    if (req.method === "GET" && url.pathname === "/conta") {
+      const info = await getLoggedInAccount();
+      return sendJson(res, 200, info);
+    }
+
+    if (req.method === "POST" && url.pathname === "/conectar") {
+      if (isSetupEmAndamento()) return sendJson(res, 409, { error: "ja tem uma janela de login aberta" });
+      log("abrindo janela de login do Facebook pedida pelo painel");
+      doSetup().catch((err) => log("erro no setup:", err.message || err));
+      return sendJson(res, 200, { started: true });
+    }
+
+    if (req.method === "POST" && url.pathname === "/desconectar") {
+      if (PROGRESS.running) return sendJson(res, 409, { error: "nao da pra desconectar com uma publicacao rodando" });
+      if (isSetupEmAndamento()) return sendJson(res, 409, { error: "feche a janela de login antes de desconectar" });
+      fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
+      log("conta desconectada pelo painel (perfil do Chrome apagado)");
+      return sendJson(res, 200, { disconnected: true });
     }
 
     if (req.method === "GET" && url.pathname === "/agenda") {

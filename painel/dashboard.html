@@ -101,15 +101,11 @@
 </div>
 
 <script>
-  // Protege a página: sem sessão, volta para o login.
-  if (sessionStorage.getItem("ed_sessao") !== "1") {
-    window.location.replace("index.html");
-  }
-
-  document.getElementById("sair").addEventListener("click", () => {
-    sessionStorage.removeItem("ed_sessao");
+  document.getElementById("sair")?.addEventListener("click", () => {
     window.location.href = "index.html";
   });
+
+  const BOT_API = "http://localhost:4599";
 
   /* ---------- Storys: redes disponíveis ---------- */
   const STORYS_REDES = [
@@ -128,6 +124,10 @@
       <span class="page-txt">
         <span class="name">${r.nome}</span><br>
         <span class="fmt">${r.fmt}</span>
+        ${r.id === "business" ? `<br><span class="conta-logada-wrap">
+          <img class="conta-logada-foto" id="business-conta-foto" alt="" hidden>
+          <span class="conta-logada" id="business-conta-logada">Verificando conta logada…</span>
+        </span>` : ""}
       </span>
       <label class="switch">
         <input type="checkbox" ${on ? "checked" : ""} aria-label="Publicar storys em ${r.nome}">
@@ -141,6 +141,38 @@
     });
     storysRedes.appendChild(row);
   });
+
+  // Mostra qual conta do Facebook esta logada no perfil isolado do bot
+  // (./chrome-profile, criado por "npm run setup"), lendo do bot local.
+  async function atualizarContaLogada() {
+    const el = document.getElementById("business-conta-logada");
+    const foto = document.getElementById("business-conta-foto");
+    if (!el) return;
+    foto.hidden = true;
+    foto.removeAttribute("src");
+    try {
+      const info = await (await fetch(`${BOT_API}/conta`)).json();
+      if (!info.checked) {
+        el.textContent = info.reason || "não foi possível verificar agora.";
+        el.className = "conta-logada";
+      } else if (info.loggedIn) {
+        el.textContent = info.nome || "conta identificada";
+        el.className = "conta-logada ok";
+        if (info.foto) {
+          foto.src = info.foto;
+          foto.alt = info.nome || "";
+          foto.hidden = false;
+        }
+      } else {
+        el.textContent = info.reason || 'nenhuma conta logada — rode "npm run setup".';
+        el.className = "conta-logada erro";
+      }
+    } catch {
+      el.textContent = 'Bot local não está rodando — rode "npm run server" para ver a conta logada.';
+      el.className = "conta-logada erro";
+    }
+  }
+  atualizarContaLogada();
 
   /* ---------- Storys: seleção de mídias ---------- */
   const storysInput = document.getElementById("storys-input");
@@ -528,7 +560,6 @@
 
   /* ---------- Storys: botão publicar (chama o bot local direto) ---------- */
 
-  const BOT_API = "http://localhost:4599";
   const btnPublicar = document.getElementById("storys-publicar");
   const btnCancelar = document.getElementById("storys-cancelar");
   const btnRemover  = document.getElementById("storys-remover");
