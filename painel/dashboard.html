@@ -32,10 +32,8 @@
       <div class="storys-redes" id="storys-redes"></div>
 
       <p class="modal-sub">Páginas dentro dessa conta empresarial</p>
-      <div class="field">
-        <label for="storys-meta-paginas">Página ativa (a que está recebendo os storys agora)</label>
-        <select id="storys-meta-paginas"></select>
-      </div>
+      <p class="field-hint">Clique na página que vai receber os storys agora.</p>
+      <div class="paginas-lista" id="storys-paginas-lista"></div>
       <div class="storys-pagina-nova">
         <input id="storys-pagina-nome" type="text" placeholder="Nome da página (ex.: Chacara Fortaleza Valinhos)">
         <input id="storys-pagina-link" type="url" placeholder="Link do Meta Business Suite dessa página">
@@ -107,6 +105,21 @@
 
   const BOT_API = "http://localhost:4599";
 
+  // O bot local so aceita uma verificacao de conta/pagina por vez (abrir
+  // duas ao mesmo tempo tentaria usar o mesmo perfil do Chrome em paralelo).
+  // O indicador "Business" do topo e a lista de paginas abaixo chamam /conta
+  // ao carregar a pagina, entao enfileira as chamadas aqui em vez de disparar
+  // em paralelo e deixar a segunda cair em "ja verificando".
+  let contaFila = Promise.resolve();
+  function verificarConta(query = "") {
+    const tarefa = contaFila.then(
+      () => fetch(`${BOT_API}/conta${query}`).then((r) => r.json()),
+      () => fetch(`${BOT_API}/conta${query}`).then((r) => r.json())
+    );
+    contaFila = tarefa.catch(() => {});
+    return tarefa;
+  }
+
   /* ---------- Storys: redes disponíveis ---------- */
   const STORYS_REDES = [
     { id: "business", nome: "Business", fmt: "Conta empresarial", cor: "#0B6E4F", ini: "BZ" }
@@ -151,7 +164,7 @@
     foto.hidden = true;
     foto.removeAttribute("src");
     try {
-      const info = await (await fetch(`${BOT_API}/conta`)).json();
+      const info = await verificarConta();
       if (!info.checked) {
         el.textContent = info.reason || "não foi possível verificar agora.";
         el.className = "conta-logada";
@@ -256,12 +269,12 @@
     localStorage.setItem(META_KEY + "_url", metaDestino.url);
     localStorage.setItem(META_KEY, JSON.stringify(metaDestino));
     renderMetaInfo(metaDestino);
-    renderPaginasSelect();
+    renderPaginasLista();
   });
 
   /* ---------- Storys: paginas salvas (trocar de conta/pagina do Meta) ---------- */
   const PAGINAS_KEY = "ed_paginas_meta";
-  const elPaginasSelect = document.getElementById("storys-meta-paginas");
+  const elPaginasLista  = document.getElementById("storys-paginas-lista");
   const elPaginaNome    = document.getElementById("storys-pagina-nome");
   const elPaginaLink    = document.getElementById("storys-pagina-link");
   const btnPaginaSalvar = document.getElementById("storys-pagina-salvar");
@@ -283,25 +296,84 @@
     ]);
   }
 
-  function renderPaginasSelect() {
-    const paginas = lerPaginas();
-    elPaginasSelect.innerHTML = paginas.map((p) => {
-      const m = parseMeta(p.url);
-      const ativa = m.businessId === metaDestino.businessId && m.assetId === metaDestino.assetId && m.businessId;
-      return `<option value="${p.url}" ${ativa ? "selected" : ""}>${p.nome}${ativa ? " (ativa agora)" : ""}</option>`;
-    }).join("") || `<option value="">Nenhuma página salva ainda</option>`;
-  }
-  renderPaginasSelect();
-
-  elPaginasSelect.addEventListener("change", () => {
-    if (!elPaginasSelect.value) return;
-    elMetaUrl.value = elPaginasSelect.value;
-    metaDestino = parseMeta(elMetaUrl.value);
+  // Troca a pagina ativa (a que recebe os storys agora) e re-renderiza a
+  // lista pra mover o destaque "ativa agora" pro card clicado.
+  function selecionarPagina(url) {
+    elMetaUrl.value = url;
+    metaDestino = parseMeta(url);
     localStorage.setItem(META_KEY + "_url", metaDestino.url);
     localStorage.setItem(META_KEY, JSON.stringify(metaDestino));
     renderMetaInfo(metaDestino);
-    renderPaginasSelect();
-  });
+    renderPaginasLista();
+  }
+
+  // Monta um card por pagina salva (foto + nome real, verificados ao vivo
+  // no Meta logo em seguida por verificarPaginasSequencial) e deixa clicar
+  // pra selecionar qual fica ativa.
+  function renderPaginasLista() {
+    const paginas = lerPaginas();
+    if (!paginas.length) {
+      elPaginasLista.innerHTML = '<p class="storys-vazio">Nenhuma página salva ainda — cadastre uma abaixo.</p>';
+      return;
+    }
+    elPaginasLista.innerHTML = paginas.map((p, i) => {
+      const m = parseMeta(p.url);
+      const ativa = m.businessId && m.businessId === metaDestino.businessId && m.assetId === metaDestino.assetId;
+      return `
+        <button type="button" class="pagina-card ${ativa ? "ativa" : ""}" data-i="${i}">
+          <img class="pagina-foto" id="pagina-foto-${i}" alt="" hidden>
+          <span class="pagina-texto">
+            <span class="pagina-nome" id="pagina-nome-${i}">${p.nome}</span><br>
+            <span class="pagina-estado" id="pagina-estado-${i}">verificando…</span>
+          </span>
+          ${ativa ? '<span class="pagina-badge">ativa agora</span>' : ""}
+        </button>
+      `;
+    }).join("");
+    elPaginasLista.querySelectorAll(".pagina-card").forEach((btn) => {
+      btn.addEventListener("click", () => selecionarPagina(paginas[+btn.dataset.i].url));
+    });
+    verificarPaginasSequencial(paginas);
+  }
+  renderPaginasLista();
+
+  // Confere nome real + foto de cada pagina salva no Meta, uma de cada vez —
+  // o perfil do Chrome do bot so aceita uma verificacao por vez (ver
+  // contaCheckEmAndamento em publish-stories.js), entao em paralelo a
+  // segunda so voltaria com "ja verificando".
+  async function verificarPaginasSequencial(paginas) {
+    for (let i = 0; i < paginas.length; i++) {
+      const elNome   = document.getElementById(`pagina-nome-${i}`);
+      const elEstado = document.getElementById(`pagina-estado-${i}`);
+      const elFoto   = document.getElementById(`pagina-foto-${i}`);
+      if (!elEstado) continue; // lista foi re-renderizada nesse meio tempo
+      const m = parseMeta(paginas[i].url);
+      if (!m.businessId || !m.assetId) {
+        elEstado.textContent = "link sem business_id/asset_id";
+        elEstado.className = "pagina-estado erro";
+        continue;
+      }
+      try {
+        const info = await verificarConta(`?business_id=${m.businessId}&asset_id=${m.assetId}`);
+        if (!document.getElementById(`pagina-estado-${i}`)) continue; // saiu da lista enquanto esperava
+        if (!info.checked) {
+          elEstado.textContent = info.reason || "não foi possível verificar agora.";
+          elEstado.className = "pagina-estado";
+        } else if (info.loggedIn) {
+          if (info.nome) elNome.textContent = info.nome;
+          elEstado.textContent = "conectada";
+          elEstado.className = "pagina-estado ok";
+          if (info.foto) { elFoto.src = info.foto; elFoto.alt = info.nome || ""; elFoto.hidden = false; }
+        } else {
+          elEstado.textContent = info.reason || "sem acesso a essa página.";
+          elEstado.className = "pagina-estado erro";
+        }
+      } catch {
+        elEstado.textContent = "bot local não está rodando.";
+        elEstado.className = "pagina-estado erro";
+      }
+    }
+  }
 
   btnPaginaSalvar.addEventListener("click", () => {
     const nome = elPaginaNome.value.trim();
@@ -316,7 +388,7 @@
     salvarPaginas(paginas);
     elPaginaNome.value = "";
     elPaginaLink.value = "";
-    renderPaginasSelect();
+    renderPaginasLista();
     storysMsg.textContent = `Página "${nome}" salva.`;
     storysMsg.className = "storys-msg ok";
   });

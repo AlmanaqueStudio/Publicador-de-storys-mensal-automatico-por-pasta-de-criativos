@@ -164,7 +164,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/conta") {
-      const info = await getLoggedInAccount();
+      // Sem business_id/asset_id, confere a pagina fixa do config.json.
+      // Com eles (dashboard verificando uma pagina salva), confere essa.
+      const businessId = url.searchParams.get("business_id");
+      const assetId = url.searchParams.get("asset_id");
+      const homeUrl = businessId && assetId
+        ? `https://business.facebook.com/latest/home?business_id=${businessId}&asset_id=${assetId}`
+        : undefined;
+      const info = await getLoggedInAccount(homeUrl);
       return sendJson(res, 200, info);
     }
 

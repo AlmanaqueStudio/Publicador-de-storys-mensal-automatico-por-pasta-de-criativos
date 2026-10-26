@@ -86,12 +86,14 @@ let contaCheckEmAndamento = false;
 
 // Usado pelo dashboard (painel/dashboard.html, via server.js) para mostrar
 // qual conta/pagina esta logada no perfil isolado do bot. Abre uma janela
-// headless curta no mesmo chrome-profile do "npm run setup", entra na pagina
-// inicial do Business Suite (CONFIG.homeUrl) e le o primeiro heading (nome da
-// pagina, ex.: "Debroi Eventos") + a foto dela (primeira imagem de
+// headless curta no mesmo chrome-profile do "npm run setup", entra na
+// pagina inicial do Business Suite (homeUrl, por padrao CONFIG.homeUrl —
+// mas o dashboard pode passar outra, pra conferir qualquer pagina salva,
+// nao so a fixa do config.json) e le o primeiro heading (nome da pagina,
+// ex.: "Debroi Eventos") + a foto dela (primeira imagem de
 // scontent.*.fbcdn.net — a foto de perfil — perto desse heading, ignorando
 // icones de rede static.xx.fbcdn.net e a foto de capa, bem maior).
-export async function getLoggedInAccount() {
+export async function getLoggedInAccount(homeUrl) {
   if (CONFIG.cdp && CONFIG.cdp.enabled) {
     return { checked: false, reason: "modo cdp ativo — essa verificacao so funciona com o perfil isolado padrao" };
   }
@@ -112,7 +114,7 @@ export async function getLoggedInAccount() {
   try {
     ctx = await chromium.launchPersistentContext(userDataDir, { headless: true, channel: "chrome" });
     const page = await ctx.newPage();
-    await page.goto(CONFIG.homeUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
+    await page.goto(homeUrl || CONFIG.homeUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
 
     const heading = page.locator('[role="heading"]').first();
     const achou = await heading.waitFor({ state: "visible", timeout: 15000 }).then(() => true).catch(() => false);
